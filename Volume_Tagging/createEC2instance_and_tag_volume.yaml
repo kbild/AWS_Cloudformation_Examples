@@ -1,0 +1,142 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: This template creates all needed Security Groups
+Parameters:
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: t2.micro
+    ConstraintDescription: must be a valid EC2 instance type.
+  ImageId:
+    Description: AMI ID
+    Type: String
+    Default: ami-0eaec5838478eb0ba
+    ConstraintDescription: must be a valid EC2 AMI ID
+Resources:
+  tagPolicy: 
+    Type: AWS::IAM::ManagedPolicy
+    Properties: 
+      ManagedPolicyName: WGC_Describe_and_Tagging
+      Description: "Policy for Tagging Ressources"
+      Path: "/"
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Allow"
+            Action: "ec2:Describe*"
+            Resource: "*"
+          - 
+            Effect: "Allow"
+            Action: "ec2:CreateTags"
+            Resource: "*"
+  tagRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      ManagedPolicyArns: [
+        !Ref tagPolicy
+      ]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal: 
+              Service: 
+                - "ec2.amazonaws.com"
+      Path: /
+      RoleName: WGC_Tag_Volumes
+  tagProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties: 
+      Path: /
+      Roles:
+        - !Ref tagRole 
+      InstanceProfileName: WGC_Tag_Volumes
+  lifecyclePolicy: 
+    Type: AWS::IAM::ManagedPolicy
+    Properties: 
+      ManagedPolicyName: WGC_Lifecycle
+      Description: "Policy for Lifecycle Management"
+      Path: "/"
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Allow"
+            Action: [
+              "ec2:CreateSnapshote",
+              "ec2:DeleteSnapshot",
+              "ec2:DescribeVolumes",
+              "ec2:DescribeSnapshots"
+            ]
+            Resource: "*"
+          - 
+            Effect: "Allow"
+            Action: "ec2:CreateTags"
+            Resource: "arn:aws:ec2:*::snapshot/*"
+  lifecycleRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      ManagedPolicyArns: [
+        !Ref lifecyclePolicy
+      ]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal: 
+              Service: 
+                - "dlm.amazonaws.com"
+      Path: /
+      RoleName: WGC_Lifecycle
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref tagProfile
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          Key=backupid
+          Value=AUT01
+          aws ec2 create-tags --resources $(aws ec2 describe-volumes --filters Name=attachment.instance-id,Values=$(curl -s http://169.254.169.254/latest/meta-data/instance-id) --query 'Volumes[*].[VolumeId]' --region=eu-central-1 --out text | cut -f 1) --tags Key=$Key,Value=$Value --region eu-central-1
+      Tags:
+      - Key: backupid
+        Value: AUT01
+      ImageId: !Ref ImageId
+      KeyName: !Ref KeyName
+  BasicLifecyclePolicy:
+    Type: "AWS::DLM::LifecyclePolicy"
+    Properties:
+      Description: "Lifecycle Policy using CloudFormation"
+      State: "ENABLED"
+      ExecutionRoleArn: !GetAtt 
+        - lifecycleRole
+        - Arn
+      PolicyDetails:
+        ResourceTypes:
+          - "VOLUME"
+        TargetTags:
+          -
+            Key: "backupid"
+            Value: "AUT01"
+        Schedules:
+          -
+            Name: "Daily Snapshots"
+            TagsToAdd:
+              -
+                Key: "type"
+                Value: "DailySnapshot"
+            CreateRule:
+              Interval: 24
+              IntervalUnit: "HOURS"
+              Times:
+                - "09:00"
+            RetainRule:
+              Count: 7
+            CopyTags: true
