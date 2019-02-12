@@ -105,6 +105,7 @@ Resources:
           Key=backupid
           Value=AUT01
           aws ec2 create-tags --resources $(aws ec2 describe-volumes --filters Name=attachment.instance-id,Values=$(curl -s http://169.254.169.254/latest/meta-data/instance-id) --query 'Volumes[*].[VolumeId]' --region=eu-central-1 --out text | cut -f 1) --tags Key=$Key,Value=$Value --region eu-central-1
+          # aws ec2 create-tags --resources $(aws ec2 describe-volumes --filters Name=attachment.instance-id,Values=$(curl -s http://169.254.169.254/latest/meta-data/instance-id) Name=attachment.device,Values=/dev/DEVICEMOUNTPOINT --query 'Volumes[*].[VolumeId]' --region=eu-central-1 --out text | cut -f 1) --tags Key=$Key,Value=$Value --region eu-central-1
       Tags:
       - Key: backupid
         Value: AUT01
