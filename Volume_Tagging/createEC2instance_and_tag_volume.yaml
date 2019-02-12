@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: This template creates all needed Security Groups
+Description: This template creates an instance and tags the instance volumes and creates a Lifecycle Manager Policy
 Parameters:
   KeyName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
