@@ -1,0 +1,337 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creates PreReqs for Cloudformation Projects with Pipelines (KMS, Buckets, Repos...)
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label:
+          default: Account Numbers
+        Parameters:
+          - DevAccount
+          - TestAccount
+          - ProductionAccount
+    ParameterLabels:
+      PreReqsOnAccounts:
+        default: Are PreReqs on Dev/Test/Prod Account done?
+      DevAccount:
+        default: Dev Account Number
+      TestAccount:
+        default: Test Account Number
+      ProductionAccount:
+        default: Dev Account Number
+Parameters:
+  DevAccount:
+    Description: AWS AccountNumber for Development
+    Type: Number
+  TestAccount:
+    Description: AWS AccountNumber for Testing
+    Type: Number
+  ProductionAccount:
+    Description: AWS AccountNumber for Production
+    Type: Number
+  PreReqsOnAccounts:
+    Description: Conditionally adds the required policies after prereqs in other accounts are met
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  Project:
+    Type: String
+    Default: serverless
+Conditions:
+  AddPolicies: !Equals [!Ref PreReqsOnAccounts, true]
+Resources:
+  KMSKey:
+    DependsOn: PipeLineRole
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Used by Assumed Roles in Dev/Test/Prod accounts to Encrypt/Decrypt code
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Id: !Sub ${Project}-Key
+        Statement:
+          -
+            Sid: Allows admin of the key
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action:
+              - "kms:Create*"
+              - "kms:Describe*"
+              - "kms:Enable*"
+              - "kms:List*"
+              - "kms:Put*"
+              - "kms:Update*"
+              - "kms:Revoke*"
+              - "kms:Disable*"
+              - "kms:Get*"
+              - "kms:Delete*"
+              - "kms:ScheduleKeyDeletion"
+              - "kms:CancelKeyDeletion"
+            Resource: "*"
+          -
+            Sid: Allow use of the key for CryptoGraphy Lambda
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${ProductionAccount}:root
+                - !Sub arn:aws:iam::${TestAccount}:root
+                - !Sub arn:aws:iam::${DevAccount}:root
+                - !Sub arn:aws:iam::${AWS::AccountId}:role/${Project}-codepipeline-Role
+                - !Sub arn:aws:iam::${AWS::AccountId}:role/${Project}-codebuild-Role
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+  KMSAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/${Project}-xaccounts
+      TargetKeyId: !Ref KMSKey
+  ProjectRepo:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: !Sub ${Project}-ProjectRepo
+      RepositoryDescription: !Sub Repo for Project ${Project}
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub ${AWS::AccountId}-${Project}-pipeline-artifacts-${AWS::Region}
+      VersioningConfiguration:
+        Status: Enabled
+  S3BucketPolicy:
+    Condition: AddPolicies
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Statement:
+          -
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+            Effect: Allow
+            Resource:
+              - !Sub arn:aws:s3:::${ArtifactBucket}
+              - !Sub arn:aws:s3:::${ArtifactBucket}/*
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${TestAccount}:role/${Project}-CentralAcctCodePipelineCFRole
+                - !Sub arn:aws:iam::${TestAccount}:role/${Project}-cloudformationdeployer-role
+                - !Sub arn:aws:iam::${ProductionAccount}:role/${Project}-CentralAcctCodePipelineCFRole
+                - !Sub arn:aws:iam::${ProductionAccount}:role/${Project}-cloudformationdeployer-role
+                - !Sub arn:aws:iam::${DevAccount}:role/${Project}-CentralAcctCodePipelineCFRole
+                - !Sub arn:aws:iam::${DevAccount}:role/${Project}-cloudformationdeployer-role
+                - !Sub arn:aws:iam::${AWS::AccountId}:role/${Project}-codepipeline-Role
+                - !Sub arn:aws:iam::${AWS::AccountId}:role/${Project}-codebuild-Role
+  BuildProjectRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Project}-codebuild-Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+  BuildProjectPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${Project}-codebuild-Policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetBucketPolicy
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+              - !Sub arn:aws:s3:::${ArtifactBucket}/*
+              - !Sub arn:aws:s3:::${ArtifactBucket}
+          -
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+            Resource: !GetAtt KMSKey.Arn
+          -
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+          -
+            Sid: cloudformation
+            Effect: Allow
+            Action:
+              - cloudformation:ValidateTemplate
+            Resource: !Sub 'arn:aws:cloudformation:${AWS::Region}:*'
+      Roles:
+        -
+          !Ref BuildProjectRole
+  PipeLineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Project}-codepipeline-Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+  PipelinePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${Project}-codepipeline-Policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Sid: codecommit
+            Effect: Allow
+            Action:
+              - codecommit:List*
+              - codecommit:Get*
+              - codecommit:GitPull
+              - codecommit:UploadArchive
+              - codecommit:CancelUploadArchive
+            Resource:
+              - !GetAtt ProjectRepo.Arn
+          -
+            Sid: codebuild
+            Effect: Allow
+            Action:
+              - codebuild:StartBuild
+              - codebuild:BatchGetBuilds
+            Resource:
+              - !GetAtt BuildProject.Arn
+          -
+            Sid: general
+            Effect: Allow
+            Action:
+              - iam:ListRoles
+              - iam:PassRole
+            Resource:
+              - !Sub "arn:aws:iam::${AWS::AccountId}:*"
+          -
+            Sid: kms
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+            Resource: !GetAtt KMSKey.Arn
+          -
+            Sid: s3
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+            Resource:
+              - !Sub arn:aws:s3:::${ArtifactBucket}/*
+              - !Sub arn:aws:s3:::${ArtifactBucket}
+          -
+            Sid: iam
+            Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Resource:
+              - !Sub arn:aws:iam::${ProductionAccount}:role/${Project}-CentralAcctCodePipelineCFRole
+              - !Sub arn:aws:iam::${TestAccount}:role/${Project}-CentralAcctCodePipelineCFRole
+              - !Sub arn:aws:iam::${DevAccount}:role/${Project}-CentralAcctCodePipelineCFRole
+          -
+            Sid: lambda
+            Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:serverless-LambdaChangeSSM
+              - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:serverless-GetOutputs
+              - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:serverless-RunBuild
+      Roles:
+        -
+          !Ref PipeLineRole
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${Project}-BuildProject
+      Description: !Sub ${Project}-BuildProject
+      EncryptionKey: !GetAtt KMSKey.Arn
+      ServiceRole: !GetAtt BuildProjectRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+        EnvironmentVariables:
+          - Name: BUILD_OUTPUT_BUCKET
+            Value: !Ref ArtifactBucket
+      Source:
+        Type: CODEPIPELINE
+Outputs:
+  ArtifactBucket:
+    Value: !Sub ${AWS::AccountId}-${Project}-pipeline-artifacts-${AWS::Region}
+    Export:
+      Name: ArtifactBucket
+  CMK:
+    Value: !GetAtt KMSKey.Arn
+    Export:
+      Name: !Sub ${Project}-KMSKeyArn
+  DevAccount:
+    Value: !Ref DevAccount
+    Export:
+      Name: !Sub ${Project}-Dev
+  TestAccount:
+    Value: !Ref TestAccount
+    Export:
+      Name: !Sub ${Project}-Test
+  ProductionAccount:
+    Value: !Ref ProductionAccount
+    Export:
+      Name: !Sub ${Project}-Prod
+  PipeLineRole:
+    Value: !GetAtt PipeLineRole.Arn
+    Export:
+      Name: !Sub ${Project}-PipeLineRoleArn
+  Devcloudformationdeployer:
+    Value: !Sub arn:aws:iam::${DevAccount}:role/${Project}-cloudformationdeployer-role
+    Export:
+      Name: !Sub ${Project}-Dev-cloudformationdeployer-role
+  Testcloudformationdeployer:
+    Value: !Sub arn:aws:iam::${TestAccount}:role/${Project}-cloudformationdeployer-role
+    Export:
+      Name: !Sub ${Project}-Test-cloudformationdeployer-role
+  Productioncloudformationdeployer:
+    Value: !Sub arn:aws:iam::${ProductionAccount}:role/${Project}-cloudformationdeployer-role
+    Export:
+      Name: !Sub ${Project}-Prod-cloudformationdeployer-role
+  DevCodePipelineCloudFormationRole:
+    Value: !Sub arn:aws:iam::${DevAccount}:role/${Project}-CentralAcctCodePipelineCFRole
+    Export:
+      Name: !Sub ${Project}-Dev-centralacctcodepipelineCFRole
+  TestCodePipelineCloudFormationRole:
+    Value: !Sub arn:aws:iam::${TestAccount}:role/${Project}-CentralAcctCodePipelineCFRole
+    Export:
+      Name: !Sub ${Project}-Test-centralacctcodepipelineCFRole
+  ProductionCodePipelineCloudFormationRole:
+    Value: !Sub arn:aws:iam::${ProductionAccount}:role/${Project}-CentralAcctCodePipelineCFRole
+    Export:
+      Name: !Sub ${Project}-Prod-centralacctcodepipelineCFRole

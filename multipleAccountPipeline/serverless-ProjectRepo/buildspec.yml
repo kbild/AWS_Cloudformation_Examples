@@ -1,0 +1,17 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 10
+    commands:
+      - cd sam-app
+      - npm install
+  build:
+    commands:
+      - sam build 
+      - sam package --s3-bucket $BUILD_OUTPUT_BUCKET --template-file template.yaml --output-template-file packaged.yml
+artifacts:
+  files:
+    - sam-app/packaged.yml
+  discard-paths: yes

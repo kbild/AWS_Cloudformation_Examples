@@ -1,0 +1,165 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Role to be assumed by CodePipeline service cross account
+Parameters:
+  S3Bucket:
+    Description: S3 Bucket in the Central Account, which holds the artifacts
+    Type: String
+  CentralAccount:
+    Description: AWS Central AccountNumber
+    Type: Number
+  CMKARN:
+    Description: ARN of the KMS CMK creates in Tools account
+    Type: String
+  Project:
+    Type: String
+    Default: serverless
+Resources:
+  CFRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Project}-CentralAcctCodePipelineCFRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Ref CentralAccount
+            Action:
+              - sts:AssumeRole
+      Path: /
+  CFPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${Project}-CentralAcctCodePipelineCloudFormationPolicy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Action:
+              - cloudformation:CreateStack
+              - cloudformation:DeleteStack
+              - cloudformation:UpdateStack
+              - cloudformation:DescribeStacks
+              - cloudformation:CreateChangeSet
+              - cloudformation:ExecuteChangeSet
+              - cloudformation:ListChangeSets
+              - cloudformation:DescribeChangeSet
+              - cloudformation:DeleteChangeSet
+            Resource: !Sub "arn:aws:cloudformation:${AWS::Region}:*"
+          -
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+            Resource:
+              - !Sub arn:aws:s3:::${S3Bucket}/*
+              - !Sub arn:aws:s3:::${S3Bucket}
+          -
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: !Sub "arn:aws:iam::${AWS::AccountId}:*"
+          -
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:Encrypt
+            Resource:
+              - !Ref CMKARN
+      Roles:
+        -
+          !Ref CFRole
+  CFDeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Project}-cloudformationdeployer-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - cloudformation.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+  CFDeployerPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${Project}-cloudformationdeployer-policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: cf
+            Effect: Allow
+            Action:
+              - cloudformation:CreateStack
+              - cloudformation:DeleteStack
+              - cloudformation:UpdateStack
+              - cloudformation:DescribeStacks
+              - cloudformation:CreateChangeSet
+              - cloudformation:ExecuteChangeSet
+              - cloudformation:ListChangeSets
+              - cloudformation:DescribeChangeSet
+              - cloudformation:DeleteChangeSet
+            Resource: !Sub "arn:aws:cloudformation:${AWS::Region}:*"
+          - Sid: s3
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetBucketPolicy
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+              - !Sub "arn:aws:s3:::${S3Bucket}/*"
+              - !Sub "arn:aws:s3:::${S3Bucket}"
+          - Sid: iam
+            Effect: Allow
+            Action:
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+              - iam:getRolePolicy
+              - iam:PutRolePolicy
+              - iam:DeleteRolePolicy
+              - iam:GetRole
+              - iam:PassRole
+              - iam:CreateServiceLinkedRole
+            Resource:
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/*"
+          - Sid: ssm
+            Effect: Allow
+            Action:
+              - ssm:GetParameters
+            Resource:
+              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*"
+          - Sid: lambda
+            Effect: Allow
+            Action:
+              - lambda:CreateFunction
+              - lambda:DeleteFunction
+              - lambda:GetFunctionConfiguration
+              - lambda:AddPermission
+              - lambda:RemovePermission
+              - lambda:UpdateFunctionConfiguration
+              - lambda:UpdateFunctionCode
+            Resource:
+              - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*"
+          - Sid: apigw
+            Effect: Allow
+            Action:
+              - apigateway:POST
+              - apigateway:DELETE
+              - apigateway:PATCH
+              - apigateway:GET
+            Resource:
+              - !Sub "arn:aws:apigateway:${AWS::Region}::/*"
+      Roles:
+        -
+          !Ref CFDeployerRole

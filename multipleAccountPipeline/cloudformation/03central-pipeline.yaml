@@ -1,0 +1,194 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creates a Project Pipeline for the different Branches
+Parameters:
+  Project:
+    Type: String
+    Default: serverless
+  RepoBranch:
+    Type: String
+    Default: "master"
+Resources:
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Location: !Sub ${AWS::AccountId}-${Project}-pipeline-artifacts-${AWS::Region}
+        Type: "S3"
+        EncryptionKey:
+          Id:
+            Fn::ImportValue:
+              !Sub "${Project}-KMSKeyArn"
+          Type: KMS
+      RoleArn:
+        Fn::ImportValue:
+          !Sub "${Project}-PipeLineRoleArn"
+      Name: !Sub ${Project}-Pipeline
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: App
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: '1'
+                Provider: CodeCommit
+              Configuration:
+                RepositoryName: !Sub ${Project}-ProjectRepo
+                BranchName: !Ref RepoBranch
+              OutputArtifacts:
+                - Name: ccArtifact
+              RunOrder: 1
+        - Name: "Build_Templates"
+          Actions:
+            - Name: CodeBuild
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: '1'
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Sub ${Project}-BuildProject
+              InputArtifacts:
+                - Name: ccArtifact
+              OutputArtifacts:
+                - Name: BuildArtifact
+              RunOrder: 1
+        - Name: Create_Change_Sets_and_Deploy_to_Dev
+          Actions:
+            - Name: CreateChangeSet_Dev
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: '1'
+                Provider: CloudFormation
+              Configuration:
+                ChangeSetName: cicd-codepipeline-ChangeSet-Dev
+                ActionMode: CHANGE_SET_REPLACE
+                StackName: cicd-codepipeline-Dev
+                Capabilities: CAPABILITY_IAM
+                ParameterOverrides: |
+                  {
+                  "Environment" : "dev"
+                  }
+                TemplatePath: BuildArtifact::packaged.yml
+                RoleArn:
+                  Fn::ImportValue:
+                    !Sub "${Project}-Dev-cloudformationdeployer-role"
+              InputArtifacts:
+                - Name: BuildArtifact
+              RunOrder: 1
+              RoleArn:
+                Fn::ImportValue:
+                  !Sub "${Project}-Dev-centralacctcodepipelineCFRole"
+            - Name: ExecuteChangeSet_Dev
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: "1"
+              Configuration:
+                ActionMode: CHANGE_SET_EXECUTE
+                RoleArn:
+                  Fn::ImportValue:
+                    !Sub "${Project}-Dev-cloudformationdeployer-role"
+                StackName: cicd-codepipeline-Dev
+                ChangeSetName: cicd-codepipeline-ChangeSet-Dev
+              OutputArtifacts:
+                - Name: cicd-codepipeline-ChangeSet-Dev
+              RunOrder: 2
+              RoleArn:
+                Fn::ImportValue:
+                  !Sub "${Project}-Dev-centralacctcodepipelineCFRole"
+        - Name: Create_Change_Sets_and_Deploy_to_Test
+          Actions:
+            - Name: CreateChangeSet_Test
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: '1'
+                Provider: CloudFormation
+              Configuration:
+                ChangeSetName: cicd-codepipeline-ChangeSet-Test
+                ActionMode: CHANGE_SET_REPLACE
+                StackName: cicd-codepipeline-Test
+                Capabilities: CAPABILITY_IAM
+                ParameterOverrides: |
+                  {
+                  "Environment" : "test"
+                  }
+                TemplatePath: BuildArtifact::packaged.yml
+                RoleArn:
+                  Fn::ImportValue:
+                    !Sub "${Project}-Test-cloudformationdeployer-role"
+              InputArtifacts:
+                - Name: BuildArtifact
+              RunOrder: 1
+              RoleArn:
+                Fn::ImportValue:
+                  !Sub "${Project}-Test-centralacctcodepipelineCFRole"
+            - Name: ExecuteChangeSet_Test
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: "1"
+              Configuration:
+                ActionMode: CHANGE_SET_EXECUTE
+                RoleArn:
+                  Fn::ImportValue:
+                    !Sub "${Project}-Test-cloudformationdeployer-role"
+                StackName: cicd-codepipeline-Test
+                ChangeSetName: cicd-codepipeline-ChangeSet-Test
+              OutputArtifacts:
+                - Name: cicd-codepipeline-ChangeSet-Test
+              RunOrder: 2
+              RoleArn:
+                Fn::ImportValue:
+                  !Sub "${Project}-Test-centralacctcodepipelineCFRole"
+        - Name: Create_Change_Sets_and_Deploy_to_Prod
+          Actions:
+            - Name: CreateChangeSet_Prod
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: '1'
+                Provider: CloudFormation
+              Configuration:
+                ChangeSetName: cicd-codepipeline-ChangeSet-Prod
+                ActionMode: CHANGE_SET_REPLACE
+                StackName: cicd-codepipeline-Prod
+                Capabilities: CAPABILITY_IAM
+                ParameterOverrides: |
+                  {
+                  "Environment" : "prod"
+                  }
+                TemplatePath: BuildArtifact::packaged.yml
+                RoleArn:
+                  Fn::ImportValue:
+                    !Sub "${Project}-Prod-cloudformationdeployer-role"
+              InputArtifacts:
+                - Name: BuildArtifact
+              RunOrder: 1
+              RoleArn:
+                Fn::ImportValue:
+                  !Sub "${Project}-Prod-centralacctcodepipelineCFRole"
+            - Name: ExecuteChangeSet_Prod
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: "1"
+              Configuration:
+                ActionMode: CHANGE_SET_EXECUTE
+                RoleArn:
+                  Fn::ImportValue:
+                    !Sub "${Project}-Prod-cloudformationdeployer-role"
+                StackName: cicd-codepipeline-Prod
+                ChangeSetName: cicd-codepipeline-ChangeSet-Prod
+              OutputArtifacts:
+                - Name: cicd-codepipeline-ChangeSet-Prod
+              RunOrder: 2
+              RoleArn:
+                Fn::ImportValue:
+                  !Sub "${Project}-Prod-centralacctcodepipelineCFRole"
