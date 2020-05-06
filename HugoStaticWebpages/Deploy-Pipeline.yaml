@@ -120,10 +120,10 @@ Resources:
           - DomainName: !Sub '${TargetS3Bucket}.s3-website.eu-central-1.amazonaws.com'
             Id: myS3Origin
             CustomOriginConfig:
-              HTTPPort: '80'
-              HTTPSPort: '443'
+              HTTPPort: 80
+              HTTPSPort: 443
               OriginProtocolPolicy: http-only
-        Enabled: 'true'
+        Enabled: true
         Comment: My Hugo Website
         DefaultRootObject: index.html
         Aliases:
@@ -135,7 +135,7 @@ Resources:
             - GET
             - HEAD
           ForwardedValues:
-            QueryString: 'false'
+            QueryString: false
             Cookies:
               Forward: none
           ViewerProtocolPolicy: redirect-to-https
@@ -194,7 +194,7 @@ Resources:
               ActionTypeId:
                 Category: Source
                 Owner: ThirdParty
-                Version: 1
+                Version: '1'
                 Provider: GitHub
               OutputArtifacts:
                 - Name: SourceCode
@@ -250,7 +250,7 @@ Resources:
       Authentication: GITHUB_HMAC
       AuthenticationConfiguration:
         SecretToken: !Ref GitHubOAuthToken
-      RegisterWithThirdParty: 'true'
+      RegisterWithThirdParty: true
       Filters:
         - JsonPath: "$.ref"
           MatchEquals: refs/heads/{Branch}
