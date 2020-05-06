@@ -110,18 +110,14 @@ Resources:
             Effect: Allow
             Principal: '*'
             Action: 's3:GetObject'
-            Resource: !Join
-              - ''
-              - - 'arn:aws:s3:::'
-                - !Ref PipelineWebpageBucket
-                - /*
+            Resource: !Sub 'arn:aws:s3:::${PipelineWebpageBucket}/*'
       Bucket: !Ref PipelineWebpageBucket
   myCloudfrontDist:
     Type: AWS::CloudFront::Distribution
     Properties:
       DistributionConfig:
         Origins:
-          - DomainName: !Join ['', [!Ref TargetS3Bucket, '.s3-website.eu-central-1.amazonaws.com']]
+          - DomainName: !Sub '${TargetS3Bucket}.s3-website.eu-central-1.amazonaws.com'
             Id: myS3Origin
             CustomOriginConfig:
               HTTPPort: '80'
@@ -153,7 +149,7 @@ Resources:
       AliasTarget:
         DNSName: !GetAtt myCloudfrontDist.DomainName
         HostedZoneId: !Ref HostedZoneId
-      HostedZoneName: !Join ['', [!Ref WebsiteName01, '.']]
+      HostedZoneName: !Sub '${WebsiteName01}.'
       Comment: DNS name for my Hugo website.
       Name: !Ref WebsiteName01
       Type: A
@@ -163,7 +159,7 @@ Resources:
       AliasTarget:
         DNSName: !GetAtt myCloudfrontDist.DomainName
         HostedZoneId: !Ref HostedZoneId
-      HostedZoneName: !Join ['', [!Ref WebsiteName01, '.']]
+      HostedZoneName: !Sub '${WebsiteName01}.'
       Comment: DNS name for my Hugo website.
       Name: !Ref WebsiteName02
       Type: A
@@ -274,10 +270,10 @@ Resources:
             Effect: Allow
             Action: s3:*
             Resource: [
-              !Join ['', ['arn:aws:s3:::', !Ref TargetS3Bucket]],
-              !Join ['', ['arn:aws:s3:::', !Ref TargetS3Bucket, '/*']],
-              !Join ['', ['arn:aws:s3:::', !Ref ArtifactsBucketName]],
-              !Join ['', ['arn:aws:s3:::', !Ref ArtifactsBucketName, '/*']]
+              !Sub 'arn:aws:s3:::${TargetS3Bucket}',
+              !Sub 'arn:aws:s3:::${TargetS3Bucket}/*',
+              !Sub 'arn:aws:s3:::${ArtifactsBucketName}',
+              !Sub 'arn:aws:s3:::${ArtifactsBucketName}/*'
             ]
           - Sid: VisualEditor1
             Effect: Allow
@@ -323,10 +319,10 @@ Resources:
             Effect: Allow
             Action: s3:*
             Resource: [
-              !Join ['', ['arn:aws:s3:::', !Ref TargetS3Bucket]],
-              !Join ['', ['arn:aws:s3:::', !Ref TargetS3Bucket, '/*']],
-              !Join ['', ['arn:aws:s3:::', !Ref ArtifactsBucketName]],
-              !Join ['', ['arn:aws:s3:::', !Ref ArtifactsBucketName, '/*']]
+              !Sub 'arn:aws:s3:::${TargetS3Bucket}',
+              !Sub 'arn:aws:s3:::${TargetS3Bucket}/*',
+              !Sub 'arn:aws:s3:::${ArtifactsBucketName}',
+              !Sub 'arn:aws:s3:::${ArtifactsBucketName}/*'
             ]
           - Sid: VisualEditor1
             Effect: Allow
