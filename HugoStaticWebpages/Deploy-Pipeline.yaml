@@ -1,3 +1,4 @@
+---
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Creates a Code Pipeline which build/updates a Hugo static Webpage with Github as Source and S3-Cloudfront as target
 Metadata:
@@ -92,7 +93,7 @@ Resources:
     Properties:
       BucketName: !Ref TargetS3Bucket
       AccessControl: PublicRead
-      MetricsConfigurations: 
+      MetricsConfigurations:
         - Id: EntireBucket
       WebsiteConfiguration:
         IndexDocument: index.html
@@ -109,7 +110,7 @@ Resources:
             Effect: Allow
             Principal: '*'
             Action: 's3:GetObject'
-            Resource: !Join 
+            Resource: !Join
               - ''
               - - 'arn:aws:s3:::'
                 - !Ref PipelineWebpageBucket
@@ -120,23 +121,23 @@ Resources:
     Properties:
       DistributionConfig:
         Origins:
-        - DomainName: !Join [ '', [!Ref TargetS3Bucket,'.s3-website.eu-central-1.amazonaws.com'] ]
-          Id: myS3Origin
-          CustomOriginConfig:
-            HTTPPort: '80'
-            HTTPSPort: '443'
-            OriginProtocolPolicy: http-only
+          - DomainName: !Join ['', [!Ref TargetS3Bucket, '.s3-website.eu-central-1.amazonaws.com']]
+            Id: myS3Origin
+            CustomOriginConfig:
+              HTTPPort: '80'
+              HTTPSPort: '443'
+              OriginProtocolPolicy: http-only
         Enabled: 'true'
         Comment: My Hugo Website
         DefaultRootObject: index.html
         Aliases:
-        - !Ref WebsiteName01
-        - !Ref WebsiteName02
+          - !Ref WebsiteName01
+          - !Ref WebsiteName02
         DefaultCacheBehavior:
           TargetOriginId: myS3Origin
           AllowedMethods:
-          - GET
-          - HEAD
+            - GET
+            - HEAD
           ForwardedValues:
             QueryString: 'false'
             Cookies:
@@ -152,7 +153,7 @@ Resources:
       AliasTarget:
         DNSName: !GetAtt myCloudfrontDist.DomainName
         HostedZoneId: !Ref HostedZoneId
-      HostedZoneName: !Join [ '', [!Ref WebsiteName01,'.'] ]
+      HostedZoneName: !Join ['', [!Ref WebsiteName01, '.']]
       Comment: DNS name for my Hugo website.
       Name: !Ref WebsiteName01
       Type: A
@@ -162,7 +163,7 @@ Resources:
       AliasTarget:
         DNSName: !GetAtt myCloudfrontDist.DomainName
         HostedZoneId: !Ref HostedZoneId
-      HostedZoneName: !Join [ '', [!Ref WebsiteName01,'.'] ]
+      HostedZoneName: !Join ['', [!Ref WebsiteName01, '.']]
       Comment: DNS name for my Hugo website.
       Name: !Ref WebsiteName02
       Type: A
@@ -190,63 +191,63 @@ Resources:
       RestartExecutionOnUpdate: true
       RoleArn: !GetAtt CodePipelineRole.Arn
       Stages:
-      - Name: Source
-        Actions:
         - Name: Source
-          InputArtifacts: []
-          ActionTypeId:
-            Category: Source
-            Owner: ThirdParty
-            Version: 1
-            Provider: GitHub
-          OutputArtifacts:
-          - Name: SourceCode
-          Configuration:
-            Owner: !Ref GitHubOwner
-            Repo: !Ref GitHubRepo
-            Branch: !Ref GitHubBranch
-            PollForSourceChanges: false
-            OAuthToken: !Ref GitHubOAuthToken
-          RunOrder: 1
-      - Name: Build
-        Actions:
-        - Name: CodeBuild
-          ActionTypeId:
-            Category: Build
-            Owner: AWS
-            Provider: CodeBuild
-            Version: '1'
-          InputArtifacts:
-            - Name: SourceCode
-          OutputArtifacts:
-          - Name: PublicFiles
-          Configuration: 
-            ProjectName: !Ref CodeBuildProject
-          RunOrder: 1
-      - Name: Deploy
-        Actions:
-        - Name: S3Deploy
-          ActionTypeId:
-            Category: Deploy
-            Owner: AWS
-            Provider: S3
-            Version: '1'
-          InputArtifacts:
-            - Name: PublicFiles
-          Configuration: 
-            BucketName: !Ref TargetS3Bucket
-            Extract: 'true'
-          RunOrder: 1
-        - Name: LambdaDeploy
-          ActionTypeId:
-            Category: Invoke
-            Owner: AWS
-            Provider: Lambda
-            Version: '1'
-          Configuration: 
-            FunctionName: invalidateCloudfront
-            UserParameters: !Ref myCloudfrontDist
-          RunOrder: 2
+          Actions:
+            - Name: Source
+              InputArtifacts: []
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              OutputArtifacts:
+                - Name: SourceCode
+              Configuration:
+                Owner: !Ref GitHubOwner
+                Repo: !Ref GitHubRepo
+                Branch: !Ref GitHubBranch
+                PollForSourceChanges: false
+                OAuthToken: !Ref GitHubOAuthToken
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: CodeBuild
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceCode
+              OutputArtifacts:
+                - Name: PublicFiles
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              RunOrder: 1
+        - Name: Deploy
+          Actions:
+            - Name: S3Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: S3
+                Version: '1'
+              InputArtifacts:
+                - Name: PublicFiles
+              Configuration:
+                BucketName: !Ref TargetS3Bucket
+                Extract: 'true'
+              RunOrder: 1
+            - Name: LambdaDeploy
+              ActionTypeId:
+                Category: Invoke
+                Owner: AWS
+                Provider: Lambda
+                Version: '1'
+              Configuration:
+                FunctionName: invalidateCloudfront
+                UserParameters: !Ref myCloudfrontDist
+              RunOrder: 2
   GithubWebhook:
     Type: 'AWS::CodePipeline::Webhook'
     Properties:
@@ -255,47 +256,47 @@ Resources:
         SecretToken: !Ref GitHubOAuthToken
       RegisterWithThirdParty: 'true'
       Filters:
-      - JsonPath: "$.ref"
-        MatchEquals: refs/heads/{Branch}
+        - JsonPath: "$.ref"
+          MatchEquals: refs/heads/{Branch}
       TargetPipeline: !Ref CodePipeline
       TargetAction: Source
       TargetPipelineVersion: !GetAtt CodePipeline.Version
-  CreateCodePipelinePolicy: 
+  CreateCodePipelinePolicy:
     Type: AWS::IAM::ManagedPolicy
-    Properties: 
+    Properties:
       ManagedPolicyName: CodePipelineAccess_Hugo
       Description: "Policy for the Codepipeline for Hugo"
       Path: "/"
-      PolicyDocument: 
+      PolicyDocument:
         Version: "2012-10-17"
         Statement:
-        - Sid: VisualEditor0
-          Effect: Allow
-          Action: s3:*
-          Resource: [
-            !Join [ '', ['arn:aws:s3:::',!Ref TargetS3Bucket] ],
-            !Join [ '', ['arn:aws:s3:::',!Ref TargetS3Bucket, '/*'] ],
-            !Join [ '', ['arn:aws:s3:::',!Ref ArtifactsBucketName] ],
-            !Join [ '', ['arn:aws:s3:::',!Ref ArtifactsBucketName, '/*'] ]
-          ]
-        - Sid: VisualEditor1
-          Effect: Allow
-          Action: logs:*
-          Resource: '*'
-        - Sid: VisualEditor2
-          Effect: Allow
-          Action: codebuild:*
-          Resource: [
-            'arn:aws:codebuild:*:*:project/BuildContainerForHTML',
-            'arn:aws:codebuild:*:*:project/BuildContainerForHTML/*'
-          ]
-        - Sid: VisualEditor3
-          Effect: Allow
-          Action: [
-            'lambda:ListFunctions',
-            'lambda:InvokeFunction'
-          ]
-          Resource: '*'
+          - Sid: VisualEditor0
+            Effect: Allow
+            Action: s3:*
+            Resource: [
+              !Join ['', ['arn:aws:s3:::', !Ref TargetS3Bucket]],
+              !Join ['', ['arn:aws:s3:::', !Ref TargetS3Bucket, '/*']],
+              !Join ['', ['arn:aws:s3:::', !Ref ArtifactsBucketName]],
+              !Join ['', ['arn:aws:s3:::', !Ref ArtifactsBucketName, '/*']]
+            ]
+          - Sid: VisualEditor1
+            Effect: Allow
+            Action: logs:*
+            Resource: '*'
+          - Sid: VisualEditor2
+            Effect: Allow
+            Action: codebuild:*
+            Resource: [
+              'arn:aws:codebuild:*:*:project/BuildContainerForHTML',
+              'arn:aws:codebuild:*:*:project/BuildContainerForHTML/*'
+            ]
+          - Sid: VisualEditor3
+            Effect: Allow
+            Action: [
+              'lambda:ListFunctions',
+              'lambda:InvokeFunction'
+            ]
+            Resource: '*'
   CodePipelineRole:
     Type: AWS::IAM::Role
     Properties:
@@ -309,28 +310,28 @@ Resources:
           Action: sts:AssumeRole
       ManagedPolicyArns:
         - !Ref CreateCodePipelinePolicy
-  CreateCodeBuildPolicy: 
+  CreateCodeBuildPolicy:
     Type: AWS::IAM::ManagedPolicy
-    Properties: 
+    Properties:
       ManagedPolicyName: CodeBuildAccess_Hugo
       Description: "Policy for access to logs and Hugo S3 Buckets"
       Path: "/"
-      PolicyDocument: 
+      PolicyDocument:
         Version: "2012-10-17"
         Statement:
-        - Sid: VisualEditor0
-          Effect: Allow
-          Action: s3:*
-          Resource: [
-            !Join [ '', ['arn:aws:s3:::',!Ref TargetS3Bucket] ],
-            !Join [ '', ['arn:aws:s3:::',!Ref TargetS3Bucket, '/*'] ],
-            !Join [ '', ['arn:aws:s3:::',!Ref ArtifactsBucketName] ],
-            !Join [ '', ['arn:aws:s3:::',!Ref ArtifactsBucketName, '/*'] ]
-          ]
-        - Sid: VisualEditor1
-          Effect: Allow
-          Action: logs:*
-          Resource: '*'
+          - Sid: VisualEditor0
+            Effect: Allow
+            Action: s3:*
+            Resource: [
+              !Join ['', ['arn:aws:s3:::', !Ref TargetS3Bucket]],
+              !Join ['', ['arn:aws:s3:::', !Ref TargetS3Bucket, '/*']],
+              !Join ['', ['arn:aws:s3:::', !Ref ArtifactsBucketName]],
+              !Join ['', ['arn:aws:s3:::', !Ref ArtifactsBucketName, '/*']]
+            ]
+          - Sid: VisualEditor1
+            Effect: Allow
+            Action: logs:*
+            Resource: '*'
   CodeBuildRole:
     Type: 'AWS::IAM::Role'
     Properties:
@@ -342,35 +343,35 @@ Resources:
           - Action:
               - 'sts:AssumeRole'
             Effect: Allow
-            Principal: 
-              Service: 
+            Principal:
+              Service:
                 - "codebuild.amazonaws.com"
       Path: /
       RoleName: CodeBuild_Role_Hugo
-  CreateLambdaExecutionPolicy: 
+  CreateLambdaExecutionPolicy:
     Type: AWS::IAM::ManagedPolicy
-    Properties: 
+    Properties:
       ManagedPolicyName: Lambda_Cloudfront_Invalidation
       Description: "Policy to invalidate Cloudfront Distribution called inside a CodePipeline"
       Path: "/"
-      PolicyDocument: 
+      PolicyDocument:
         Version: "2012-10-17"
         Statement:
-        - Sid: VisualEditor0
-          Effect: Allow
-          Action: cloudfront:CreateInvalidation
-          Resource: '*'
-        - Sid: VisualEditor1
-          Effect: Allow
-          Action: [
-            'codepipeline:PutJobSuccessResult',
-            'codepipeline:PutJobFailureResult'
-          ]
-          Resource: '*'
-        - Sid: VisualEditor2
-          Effect: Allow
-          Action: logs:*
-          Resource: '*'
+          - Sid: VisualEditor0
+            Effect: Allow
+            Action: cloudfront:CreateInvalidation
+            Resource: '*'
+          - Sid: VisualEditor1
+            Effect: Allow
+            Action: [
+              'codepipeline:PutJobSuccessResult',
+              'codepipeline:PutJobFailureResult'
+            ]
+            Resource: '*'
+          - Sid: VisualEditor2
+            Effect: Allow
+            Action: logs:*
+            Resource: '*'
   LambdaExecutedRole:
     Type: 'AWS::IAM::Role'
     Properties:
@@ -382,21 +383,21 @@ Resources:
           - Action:
               - 'sts:AssumeRole'
             Effect: Allow
-            Principal: 
-              Service: 
+            Principal:
+              Service:
                 - "lambda.amazonaws.com"
       Path: /
       RoleName: LambdaExecutedRole_Invalidate
-  LambdaCloudfrontInvalidation: 
+  LambdaCloudfrontInvalidation:
     Type: "AWS::Lambda::Function"
-    Properties: 
+    Properties:
       Handler: "invalidateCloudFront.lambda_handler"
       FunctionName: invalidateCloudfront
-      Role: 
-        Fn::GetAtt: 
+      Role:
+        Fn::GetAtt:
           - "LambdaExecutedRole"
           - "Arn"
-      Code: 
+      Code:
         S3Bucket: !Ref SourceS3Bucket
         S3Key: "invalidateCloudFront.zip"
       Runtime: "python2.7"
