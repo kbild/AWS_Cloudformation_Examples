@@ -1,0 +1,791 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'StateMachine which can be used as custom CF resource for certificate or DNS entry creation '
+Parameters:
+  CrossAccountArn:
+    Type: String
+    Default: arn:aws:iam::777777777777:role/xaccount-Route53-Role
+    Description: ARN of the xaccount role in the Route53 AWS account
+Resources:
+  LambdaExecutionPolicyCallStateMachine:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Path: "/"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: cloudfront
+            Effect: Allow
+            Action: cloudfront:CreateInvalidation
+            Resource: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/*'
+          - Sid: states
+            Effect: Allow
+            Action: [
+              'states:StartExecution',
+              'states:DescribeExecution'
+            ]
+            Resource: '*'
+          - Sid: log
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+  LambdaExecutionPolicyCreateCert:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Path: "/"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: acm
+            Effect: Allow
+            Action:
+              - acm:RequestCertificate
+            Resource: '*'
+          - Sid: log
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+  LambdaExecutionPolicyDescribeCert:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Path: "/"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: acm
+            Effect: Allow
+            Action:
+              - acm:DescribeCertificate
+            Resource: '*'
+          - Sid: log
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+  LambdaExecutionPolicyCreateDNSRecord:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Path: "/"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: route53
+            Effect: Allow
+            Action:
+              - route53:ChangeResourceRecordSets
+            Resource: 'arn:aws:route53:::hostedzone/*'
+          - Sid: sts
+            Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Resource: !Ref CrossAccountArn
+          - Sid: log
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+  LambdaExecutionPolicySendResult:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Path: "/"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: cf
+            Effect: Allow
+            Action:
+              - route53:ChangeResourceRecordSets
+            Resource: 'arn:aws:route53:::hostedzone/*'
+          - Sid: log
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+  LambdaExecutionPolicyDelete:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Path: "/"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: cf
+            Effect: Allow
+            Action:
+              - route53:ChangeResourceRecordSets
+            Resource: 'arn:aws:route53:::hostedzone/*'
+          - Sid: log
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+          - Sid: acm
+            Effect: Allow
+            Action:
+              - acm:DeleteCertificate
+            Resource: '*'
+          - Sid: sts
+            Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Resource: !Ref CrossAccountArn
+  LambdaExecutionRoleCallStateMachine:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      ManagedPolicyArns: [
+        !Ref LambdaExecutionPolicyCallStateMachine
+      ]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+      Path: /
+  LambdaExecutionRoleCreateCert:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      ManagedPolicyArns: [
+        !Ref LambdaExecutionPolicyCreateCert
+      ]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+      Path: /
+  LambdaExecutionRoleDescribeCert:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      ManagedPolicyArns: [
+        !Ref LambdaExecutionPolicyDescribeCert
+      ]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+      Path: /
+  LambdaExecutionRoleCreateDNSRecord:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      ManagedPolicyArns: [
+        !Ref LambdaExecutionPolicyCreateDNSRecord
+      ]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+      Path: /
+  LambdaExecutionRoleSendResult:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      ManagedPolicyArns: [
+        !Ref LambdaExecutionPolicySendResult
+      ]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+      Path: /
+  LambdaExecutionRoleDelete:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      ManagedPolicyArns: [
+        !Ref LambdaExecutionPolicyDelete
+      ]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+      Path: /
+  LambdaCallStateMachine:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: index.lambda_handler
+      FunctionName: !Sub CallStateMachine-${AWS::AccountId}
+      Environment:
+        Variables:
+          statemachineARN : !Ref CertificateStateMachine
+      Role: !Sub ${LambdaExecutionRoleCallStateMachine.Arn}
+      Code:
+        ZipFile: |
+          from botocore.exceptions import ClientError
+          import boto3
+          import cfnresponse
+          import os
+          import json
+
+          statemachineARN = os.getenv('statemachineARN')
+
+          def lambda_handler(event, context):
+              sfn_client = boto3.client('stepfunctions')
+              try:
+                  response = sfn_client.start_execution(stateMachineArn=statemachineARN,input=(json.dumps(event)))
+                  sfn_arn = response.get('executionArn')
+                  print(sfn_arn)
+              except Exception:
+                  print('Could not run the Step Function')
+                  responseData = {}
+                  responseData['Error'] = "CouldNotCallStateMachine"
+                  response=cfnresponse.send(event, context, FAILED, responseData)
+                  return(response)
+              return(sfn_arn)
+      Runtime: "python2.7"
+      Timeout: 25
+  LambdaCallDnsStateMachine:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: index.lambda_handler
+      FunctionName: !Sub CallDnsStateMachine-${AWS::AccountId}
+      Environment:
+        Variables:
+          statemachineARN : !Ref DNSStateMachine
+      Role: !Sub ${LambdaExecutionRoleCallStateMachine.Arn}
+      Code:
+        ZipFile: |
+          from botocore.exceptions import ClientError
+          import boto3
+          import cfnresponse
+          import os
+          import json
+
+          statemachineARN = os.getenv('statemachineARN')
+
+          def lambda_handler(event, context):
+              sfn_client = boto3.client('stepfunctions')
+              try:
+                  response = sfn_client.start_execution(stateMachineArn=statemachineARN,input=(json.dumps(event)))
+                  sfn_arn = response.get('executionArn')
+                  print(sfn_arn)
+              except Exception:
+                  print('Could not run the Step Function')
+                  responseData = {}
+                  responseData['Error'] = "CouldNotCallStateMachine"
+                  response=cfnresponse.send(event, context, FAILED, responseData)
+                  return(response)
+              return(sfn_arn)
+      Runtime: "python2.7"
+      Timeout: 25
+  LambdaCreateCertificateRequest:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: index.lambda_handler
+      FunctionName: !Sub CreateCertificateRequest-${AWS::AccountId}
+      Role: !Sub ${LambdaExecutionRoleCreateCert.Arn}
+      Code:
+        ZipFile: |
+          from botocore.exceptions import ClientError
+          import boto3
+          def lambda_handler(event, context):
+              client = boto3.client('acm', region_name=event['Region'])
+              response = client.request_certificate(
+                  DomainName=event['WebSiteURL'],
+                  ValidationMethod='DNS',
+                  IdempotencyToken='RequestId'
+              )
+              return (response['CertificateArn'])
+      Runtime: "python2.7"
+      Timeout: 25
+  LambdaDeleteResource:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: index.lambda_handler
+      FunctionName: !Sub DeleteCustomResource-${AWS::AccountId}
+      Role: !Sub ${LambdaExecutionRoleDelete.Arn}
+      Environment:
+        Variables:
+          RoleArn : !Ref CrossAccountArn
+      Code:
+        ZipFile: |
+          from botocore.exceptions import ClientError
+          import boto3
+          import os
+
+          def lambda_handler(event, context):
+              RoleArn = os.getenv('RoleArn')
+              try:
+                  sts_connection = boto3.client('sts')
+                  acct_b = sts_connection.assume_role(
+                      RoleArn=RoleArn,
+                      RoleSessionName="cross_acct_lambda"
+                  )
+                  ACCESS_KEY = acct_b['Credentials']['AccessKeyId']
+                  SECRET_KEY = acct_b['Credentials']['SecretAccessKey']
+                  SESSION_TOKEN = acct_b['Credentials']['SessionToken']
+              except Exception as e:
+                  print(e)
+                  message = 'Could not get assumerole for Lambda function'
+                  print(message)
+              try:
+                  client = boto3.client(
+                          'route53',
+                          aws_access_key_id=ACCESS_KEY,
+                          aws_secret_access_key=SECRET_KEY,
+                          aws_session_token=SESSION_TOKEN,
+                      )
+                  print(event['HostedZoneId'])
+                  print(event['Name'])
+                  zone_id = '/hostedzone/' + event['HostedZoneId']
+                  response = client.change_resource_record_sets(
+                      HostedZoneId=zone_id,
+                      ChangeBatch={
+                          'Changes': [
+                              {
+                                  'Action': 'DELETE',
+                                  'ResourceRecordSet': {
+                                      'Name': event['Name'],
+                                      'ResourceRecords': [
+                                          {
+                                              'Value': event['Value']
+                                          }
+                                      ],
+                                      'Type': 'CNAME',
+                                      'TTL': 900
+                                  }
+                              }
+                          ]
+                      }
+                  )
+                  print (response)
+              except Exception as e:
+                  print("No DNS entries to delete")
+              try:
+                  clientacm = boto3.client('acm', region_name=event['Region'])
+                  responseacm = clientacm.delete_certificate(
+                      CertificateArn=event['PhysicalResourceId']
+                  )
+                  return (responseacm)
+              except Exception as e:
+                  return("No certificates to delete")
+      Runtime: "python2.7"
+      Timeout: 25
+  LambdaDescribeCertificateRequest:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: index.lambda_handler
+      FunctionName: !Sub DescribeCertificateRequest-${AWS::AccountId}
+      Role: !Sub ${LambdaExecutionRoleDescribeCert.Arn}
+      Code:
+        ZipFile: |
+          from botocore.exceptions import ClientError
+          import boto3
+          def lambda_handler(event, context):
+              client = boto3.client('acm', region_name=event['ResourceProperties']['Region'])
+              if 'CertificateArn' in event.keys():
+                  certificatearn=event['CertificateArn']
+              elif 'PhysicalResourceId' in event.keys():
+                  if 'arn:' in event['PhysicalResourceId']:
+                      certificatearn=event['PhysicalResourceId']
+                  else:
+                      empty_result={}
+                      empty_result['Name'] = "empty"
+                      empty_result['Value'] = "empty"
+                      empty_result['CertificateArn'] = "empty"
+                      return(empty_result)
+              else:
+                  return("CouldNotFindCert")
+              print(certificatearn)
+              certificateinfos = client.describe_certificate(
+                  CertificateArn=certificatearn
+              )
+              status=(certificateinfos['Certificate']['Status'])
+              result=(certificateinfos['Certificate']['DomainValidationOptions'][0])
+              changed_result={}
+              changed_result['CertificateArn'] = certificatearn
+              changed_result['Name'] = result['ResourceRecord']['Name']
+              changed_result['Value'] = result['ResourceRecord']['Value']
+              changed_result['ValidationStatus'] = result['ValidationStatus']
+              print(changed_result)
+              return(changed_result)
+      Runtime: "python2.7"
+      Timeout: 25
+  LambdaCreateDNSEntry:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: index.lambda_handler
+      FunctionName: !Sub CreateDNSRecord-${AWS::AccountId}
+      Environment:
+        Variables:
+          RoleArn : !Ref CrossAccountArn
+      Role: !Sub ${LambdaExecutionRoleCreateDNSRecord.Arn}
+      Code:
+        ZipFile: |
+          from botocore.exceptions import ClientError
+          import boto3
+          import os
+
+          def lambda_handler(event, context):
+              RoleArn = os.getenv('RoleArn')
+              try:
+                  sts_connection = boto3.client('sts')
+                  acct_b = sts_connection.assume_role(
+                      RoleArn=RoleArn,
+                      RoleSessionName="cross_acct_lambda"
+                  )
+                  ACCESS_KEY = acct_b['Credentials']['AccessKeyId']
+                  SECRET_KEY = acct_b['Credentials']['SecretAccessKey']
+                  SESSION_TOKEN = acct_b['Credentials']['SessionToken']
+              except Exception as e:
+                  print(e)
+                  message = 'Could not get assumerole for Lambda function'
+                  print(message)
+              client = boto3.client(
+                      'route53',
+                      aws_access_key_id=ACCESS_KEY,
+                      aws_secret_access_key=SECRET_KEY,
+                      aws_session_token=SESSION_TOKEN,
+                  )
+              print(event['HostedZoneId'])
+              zone_id = '/hostedzone/' + event['HostedZoneId']
+              response = client.change_resource_record_sets(
+                  HostedZoneId=zone_id,
+                  ChangeBatch={
+                      'Changes': [
+                          {
+                              'Action': 'UPSERT',
+                              'ResourceRecordSet': {
+                                  'Name': event['Name'],
+                                  'ResourceRecords': [
+                                      {
+                                          'Value': event['Value']
+                                      }
+                                  ],
+                                  'Type': 'CNAME',
+                                  'TTL': 900
+                              }
+                          }
+                      ]
+                  }
+              )
+              print (response)
+      Runtime: "python2.7"
+      Timeout: 25
+  LambdaSendResult:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: index.lambda_handler
+      FunctionName: !Sub CF-SendResult-${AWS::AccountId}
+      Role: !Sub ${LambdaExecutionRoleSendResult.Arn}
+      Code:
+        ZipFile: |
+          from botocore.exceptions import ClientError
+          import boto3
+          import cfnresponse
+          import os
+          import json
+
+          def lambda_handler(event, context):
+              responseData = {}
+              if 'CertInfos' in event.keys():
+                  if 'NoCertArn' in event['CertInfos']:
+                      certificatearn=event['PhysicalResourceId']
+                      status="SUCCESS"
+                      physicalResourceId = None
+                  else:
+                      responseData['certificate_arn'] = event['CertInfos']['CertificateArn']
+                      responseData['cname_name'] = event['CertInfos']['Name']
+                      responseData['cname_value'] = event['CertInfos']['Value']
+                      physicalResourceId = event['CertInfos']['CertificateArn']
+                      status="SUCCESS"
+              elif 'error-info' in event.keys():
+                  responseData['certificate_arn'] = event['error-info']['Error']
+                  physicalResourceId = None
+                  status="FAILED"
+              else:
+                  responseData['message'] = "Error resolved"
+                  physicalResourceId = "ErrorResolved"
+                  status="SUCCESS"
+              response=cfnresponse.send(event, context, status, responseData, physicalResourceId)
+              print(response)
+              return(response)
+      Runtime: "python2.7"
+      Timeout: 25
+  StateMachineRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub states.${AWS::Region}.amazonaws.com
+            Action: "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        - PolicyName: StatesExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "lambda:InvokeFunction"
+                Resource: "*"
+  CertificateStateMachine:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      DefinitionString: !Sub
+        |-
+          {
+            "StartAt": "Choice Action",
+            "States": {
+              "Choice Action": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.RequestType",
+                    "StringEquals": "Delete",
+                    "Next": "DescribeCertDeletion"
+                  },
+                  {
+                    "Or": [
+                      {
+                        "Variable": "$.RequestType",
+                        "StringEquals": "Create"
+                      },
+                      {
+                        "Variable": "$.RequestType",
+                        "StringEquals": "Update"
+                      }
+                    ],
+                    "Next": "Create"
+                  }
+                ]
+              },
+              "Create": {
+                "Type": "Task",
+                "Resource": "${LambdaCreateCertificateRequest.Arn}",
+                "Next": "Wait_10_seconds",
+                "Parameters": {
+                        "HostedZoneId.$": "$.ResourceProperties.HostedZoneId",
+                        "WebSiteURL.$": "$.ResourceProperties.WebSiteURL",
+                        "Region.$": "$.ResourceProperties.Region",
+                        "ResponseURL.$": "$.ResponseURL",
+                        "StackId.$": "$.StackId",
+                        "RequestId.$": "$.RequestId",
+                        "LogicalResourceId.$": "$.LogicalResourceId"
+                      },
+                "ResultPath": "$.CertificateArn",
+                "Catch": [
+                  {
+                    "ErrorEquals": [
+                      "States.ALL"
+                    ],
+                    "ResultPath": "$.error-info",
+                    "Next": "SendResultFails"
+                  }
+                ]
+              },
+              "Delete": {
+                "Type": "Task",
+                "Resource": "${LambdaDeleteResource.Arn}",
+                "Next": "SendResultDeletion",
+                "Parameters": {
+                      "HostedZoneId.$": "$.ResourceProperties.HostedZoneId",
+                      "Region.$": "$.ResourceProperties.Region",
+                      "Name.$": "$.CertInfos.Name",
+                      "Value.$": "$.CertInfos.Value",
+                      "PhysicalResourceId.$": "$.PhysicalResourceId"
+                    },
+                "ResultPath": "$.Deletion"
+              },
+              "Wait_10_seconds": {
+                "Type": "Wait",
+                "Seconds": 10,
+                "Next": "DescribeCert"
+              },
+              "DescribeCert": {
+                "Type": "Task",
+                "Resource": "${LambdaDescribeCertificateRequest.Arn}",
+                "Next": "CreateDNS",
+                "ResultPath": "$.CertInfos"
+              },
+              "DescribeCertDeletion": {
+                "Type": "Task",
+                "Resource": "${LambdaDescribeCertificateRequest.Arn}",
+                "Next": "Delete",
+                "ResultPath": "$.CertInfos"
+              },
+              "CreateDNS": {
+                "Type": "Task",
+                "Resource": "${LambdaCreateDNSEntry.Arn}",
+                "Next": "CheckCert",
+                "Parameters": {
+                      "HostedZoneId.$": "$.ResourceProperties.HostedZoneId",
+                      "Name.$": "$.CertInfos.Name",
+                      "Value.$": "$.CertInfos.Value"
+                    },
+                "ResultPath": "$.CreateDNS"
+              },
+              "CheckCert": {
+                "Type": "Task",
+                "Resource": "${LambdaDescribeCertificateRequest.Arn}",
+                "Next": "Cert Ready?",
+                "ResultPath": "$.CheckCert"
+              },
+              "Cert Ready?": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.CheckCert.ValidationStatus",
+                    "StringEquals": "SUCCESS",
+                    "Next": "SendResultCreation"
+                  },
+                  {
+                    "Variable": "$.CheckCert.ValidationStatus",
+                    "StringEquals": "PENDING_VALIDATION",
+                    "Next": "Wait_100_seconds_for_certificate"
+                  }
+                ]
+              },
+              "Wait_100_seconds_for_certificate": {
+                "Type": "Wait",
+                "Seconds": 100,
+                "Next": "CheckCert"
+              },
+              "SendResultCreation": {
+                "Type": "Task",
+                "Resource": "${LambdaSendResult.Arn}",
+                "End": true,
+                "ResultPath": "$.SendResult"
+              },
+              "SendResultDeletion": {
+                "Type": "Task",
+                "Resource": "${LambdaSendResult.Arn}",
+                "End": true,
+                "ResultPath": "$.SendResult"
+              },
+              "SendResultFails": {
+                "Type": "Task",
+                "Resource": "${LambdaSendResult.Arn}",
+                "End": true,
+                "ResultPath": "$.SendResult"
+              }
+            }
+          }
+      RoleArn: !GetAtt StateMachineRole.Arn
+  DNSStateMachine:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      DefinitionString: !Sub
+        |-
+          {
+            "StartAt": "Choice Action",
+            "States": {
+              "Choice Action": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.RequestType",
+                    "StringEquals": "Delete",
+                    "Next": "Delete"
+                  },
+                  {
+                    "Or": [
+                      {
+                        "Variable": "$.RequestType",
+                        "StringEquals": "Create"
+                      },
+                      {
+                        "Variable": "$.RequestType",
+                        "StringEquals": "Update"
+                      }
+                    ],
+                    "Next": "Create"
+                  }
+                ]
+              },
+              "Create": {
+                "Type": "Task",
+                "Resource": "${LambdaCreateDNSEntry.Arn}",
+                "Next": "SendResultCreation",
+                "Parameters": {
+                        "HostedZoneId.$": "$.ResourceProperties.HostedZoneId",
+                        "Name.$": "$.ResourceProperties.WebSiteURL",
+                        "Value.$": "$.ResourceProperties.Endpoint"
+                      },
+                "ResultPath": "$.CertificateArn",
+                "Catch": [
+                  {
+                    "ErrorEquals": [
+                      "States.ALL"
+                    ],
+                    "ResultPath": "$.error-info",
+                    "Next": "SendResultFails"
+                  }
+                ]
+              },
+              "Delete": {
+                "Type": "Task",
+                "Resource": "${LambdaDeleteResource.Arn}",
+                "Next": "SendResultDeletion",
+                "Parameters": {
+                        "HostedZoneId.$": "$.ResourceProperties.HostedZoneId",
+                        "Name.$": "$.ResourceProperties.WebSiteURL",
+                        "Value.$": "$.ResourceProperties.Endpoint"
+                      },
+                "ResultPath": "$.Deletion"
+              },
+              "SendResultCreation": {
+                "Type": "Task",
+                "Resource": "${LambdaSendResult.Arn}",
+                "End": true,
+                "ResultPath": "$.SendResult"
+              },
+              "SendResultDeletion": {
+                "Type": "Task",
+                "Resource": "${LambdaSendResult.Arn}",
+                "End": true,
+                "ResultPath": "$.SendResult"
+              },
+              "SendResultFails": {
+                "Type": "Task",
+                "Resource": "${LambdaSendResult.Arn}",
+                "End": true,
+                "ResultPath": "$.SendResult"
+              }
+            }
+          }
+      RoleArn: !GetAtt StateMachineRole.Arn
+Outputs:
+  LambdaCallStateMachine:
+    Value: !GetAtt  LambdaCallStateMachine.Arn
+    Export:
+      Name: LambdaCallStateMachineCertArn
+  LambdaCallStateMachine2:
+    Value: !GetAtt  LambdaCallDnsStateMachine.Arn
+    Export:
+      Name: LambdaCallStateMachineDnsArn
