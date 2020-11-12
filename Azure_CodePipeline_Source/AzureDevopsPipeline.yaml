@@ -1,0 +1,159 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Create Custom CodePipeline Source Action for MS DevOps
+Parameters:
+  Organization:
+    Default: 'Org_4_AWS'
+    Description: Azure DevOps Organization
+    Type: String
+  Repo:
+    Default: 'Repo_4_AWS'
+    Description: Azure DevOps Repo
+    Type: String
+  Project:
+    Default: 'Project_4_AWS'
+    Description: Azure DevOps Project
+    Type: String
+  Branch:
+    Default: 'master'
+    Description: Azure DevOps Branch
+    Type: String
+  PipelineName:
+    Default: 'AzureDevopsProject1'
+    Description: PipeLine Name
+    Type: String
+Resources:
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+  DeployBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+  PipelinePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub AzureDevops-CodePipelinePolicy-${AWS::StackName}
+      Path: "/"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: s3
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:Get*
+              - s3:List
+            Resource: [
+              !Sub '${ArtifactBucket.Arn}',
+              !Sub '${ArtifactBucket.Arn}/*',
+              !Sub '${DeployBucket.Arn}',
+              !Sub '${DeployBucket.Arn}/*'
+            ]
+          - Sid: cloudwatch
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+  PipelineRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      ManagedPolicyArns: [
+        !Ref PipelinePolicy
+      ]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - "codepipeline.amazonaws.com"
+      Path: /
+  AppPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Ref PipelineName
+      RoleArn: !Sub ${PipelineRole.Arn}
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: AzureDevOps
+              ActionTypeId:
+                Category: Source
+                Owner: Custom
+                Version: "1"
+                Provider: AzureDevOpsRepo
+              OutputArtifacts:
+                - Name: AzureCode
+              Configuration:
+                Organization: !Ref Organization
+                Repo: !Ref Repo
+                Branch: !Ref Branch
+                Project: !Ref Project
+                PipelineName: !Ref PipelineName
+              RunOrder: 1
+        - Name: Deploy
+          Actions:
+            - Name: S3deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: S3
+                Version: '1'
+              InputArtifacts:
+                - Name: AzureCode
+              Configuration:
+                BucketName: !Ref DeployBucket
+                Extract: true
+              RunOrder: 1
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+  Webhook:
+    Type: 'AWS::CodePipeline::Webhook'
+    Properties:
+      AuthenticationConfiguration: {}
+      Filters:
+        - JsonPath: "$.resource.refUpdates..name"
+          MatchEquals: !Sub 'refs/heads/${Branch}'
+      Authentication: UNAUTHENTICATED
+      TargetPipeline: !Ref AppPipeline
+      TargetAction: Source
+      Name: !Sub AzureDevopsHook-${AWS::StackName}
+      TargetPipelineVersion: !Sub ${AppPipeline.Version}
+      RegisterWithThirdParty: False
+  BuildProjectPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${AWS::StackName}-codebuild-Policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetBucketPolicy
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+              - !Sub '${ArtifactBucket.Arn}'
+              - !Sub '${ArtifactBucket.Arn}/*'
+              - !Sub '${DeployBucket.Arn}'
+              - !Sub '${DeployBucket.Arn}/*'
+      Roles:
+        -
+          !ImportValue BuildProjectRole
+Outputs:
+  Webhook:
+    Value: !Sub ${Webhook.Url}
+    Export:
+      Name: !Sub ${AWS::StackName}-WebhookUrl

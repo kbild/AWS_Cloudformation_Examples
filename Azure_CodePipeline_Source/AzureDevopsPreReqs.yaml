@@ -1,0 +1,372 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Create Custom CodePipeline Source Action for MS DevOps
+Resources:
+  SSHKey:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: 'Private SSH Key for Azure DevOps'
+      Name: SSHKeyAzure
+      SecretString: 'tbf'
+  AzureDevopsActionType:
+    Type: AWS::CodePipeline::CustomActionType
+    Properties:
+      Category: Source
+      Provider: "AzureDevOpsRepo"
+      Version: "1"
+      ConfigurationProperties:
+        -
+          Description: "The name of the MS Azure DevOps Organization"
+          Key: false
+          Name: Organization
+          Queryable: false
+          Required: true
+          Secret: false
+          Type: String
+        -
+          Description: "The name of the repository"
+          Key: true
+          Name: Repo
+          Queryable: false
+          Required: true
+          Secret: false
+          Type: String
+        -
+          Description: "The name of the project"
+          Key: false
+          Name: Project
+          Queryable: false
+          Required: true
+          Secret: false
+          Type: String
+        -
+          Description: "The tracked branch"
+          Key: false
+          Name: Branch
+          Queryable: false
+          Required: true
+          Secret: false
+          Type: String
+        -
+          Description: "The name of the CodePipeline"
+          Key: false
+          Name: PipelineName
+          Queryable: true
+          Required: true
+          Secret: false
+          Type: String
+      InputArtifactDetails:
+        MaximumCount: 0
+        MinimumCount: 0
+      OutputArtifactDetails:
+        MaximumCount: 1
+        MinimumCount: 1
+      Settings:
+        EntityUrlTemplate: "https://dev.azure.com/{Config:Organization}/{Config:Project}/_git/{Config:Repo}?version=GB{Config:Branch}"
+        ExecutionUrlTemplate: "https://dev.azure.com/{Config:Organization}/{Config:Project}/_git/{Config:Repo}?version=GB{Config:Branch}"
+  BuildProjectRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-codebuild-Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+  BuildProjectPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${AWS::StackName}-codebuild-Policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: cloudwatch
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+          - Sid: codepipeline
+            Effect: Allow
+            Action:
+              - codepipeline:PollForJobs
+            Resource: !Sub 'arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:actiontype:Custom/Source/AzureDevOpsRepo/*'
+          - Sid: codepipeline2
+            Effect: Allow
+            Action:
+              - codepipeline:AcknowledgeJob
+              - codepipeline:PutJobSuccessResult
+              - codepipeline:StopPipelineExecution
+            Resource: '*'
+          - Sid: secretsmanager
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Ref SSHKey
+      Roles:
+        -
+          !Ref BuildProjectRole
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${AWS::StackName}-GetAzureDevOps-Repo
+      ServiceRole: !GetAtt BuildProjectRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+        EnvironmentVariables:
+          - Name: pipelinename
+            Value: 'wbf'
+          - Name: executionid
+            Value: 'wbf'
+      Source:
+        Type: NO_SOURCE
+        BuildSpec: !Sub |
+                    version: 0.2
+                    env:
+                      exported-variables:
+                        - jobid
+                    phases:
+                      pre_build:
+                        commands:
+                          - echo $pipelinename
+                          - echo $executionid
+                          - wait_period=0
+                          - |
+                            while true
+                            do
+                                jobdetail=$(aws codepipeline poll-for-jobs --action-type-id category="Source",owner="Custom",provider="AzureDevOpsRepo",version="1" --query-param PipelineName=$pipelinename --max-batch-size 1)
+                                provider=$(echo $jobdetail | jq '.jobs[0].data.actionTypeId.provider' -r)
+                                wait_period=$(($wait_period+10))
+                                if [ $provider = "AzureDevOpsRepo" ];then
+                                  echo $jobdetail
+                                  break
+                                fi
+                                if [ $wait_period -gt 300 ];then
+                                  echo "Haven't found a pipeline job for 5 minutes, will stop pipeline."
+                                  exit 1
+                                else
+                                  echo "No pipeline job found, will try again in 10 seconds"
+                                  sleep 10
+                                fi
+                            done
+                          - jobid=$(echo $jobdetail | jq '.jobs[0].id' -r)
+                          - echo $jobid
+                          - ack=$(aws codepipeline acknowledge-job --job-id $(echo $jobdetail | jq '.jobs[0].id' -r) --nonce $(echo $jobdetail | jq '.jobs[0].nonce' -r))
+                          - Branch=$(echo $jobdetail | jq '.jobs[0].data.actionConfiguration.configuration.Branch' -r)
+                          - Organization=$(echo $jobdetail | jq '.jobs[0].data.actionConfiguration.configuration.Organization' -r)
+                          - Repo=$(echo $jobdetail | jq '.jobs[0].data.actionConfiguration.configuration.Repo' -r)
+                          - Project=$(echo $jobdetail | jq '.jobs[0].data.actionConfiguration.configuration.Project' -r)
+                          - ObjectKey=$(echo $jobdetail | jq '.jobs[0].data.outputArtifacts[0].location.s3Location.objectKey' -r)
+                          - BucketName=$(echo $jobdetail | jq '.jobs[0].data.outputArtifacts[0].location.s3Location.bucketName' -r)
+                          - aws secretsmanager get-secret-value --secret-id ${SSHKey} --query 'SecretString' --output text | base64 --decode > ~/.ssh/id_rsa
+                          - chmod 600 ~/.ssh/id_rsa
+                          - ssh-keygen -F ssh.dev.azure.com || ssh-keyscan ssh.dev.azure.com >>~/.ssh/known_hosts
+                      build:
+                        commands:
+                          - git clone "git@ssh.dev.azure.com:v3/$Organization/$Project/$Repo"
+                          - cd $Repo
+                          - git checkout $Branch
+                          - zip -r output_file.zip *
+                          - aws s3 cp output_file.zip s3://$BucketName/$ObjectKey
+                          - aws codepipeline put-job-success-result --job-id $(echo $jobdetail | jq '.jobs[0].id' -r)
+                    artifacts:
+                      files:
+                        - '**/*'
+                      base-directory: '$Repo'
+  CloudWatchEventRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        -
+          PolicyName: !Sub ${AWS::StackName}-jobworker
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: codebuild
+                Effect: Allow
+                Action: 'codebuild:StartBuild'
+                Resource: !Sub ${BuildProject.Arn}
+  CloudWatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - aws.codepipeline
+        detail-type:
+          - 'CodePipeline Action Execution State Change'
+        detail:
+          state:
+            - STARTED
+          type:
+            provider:
+              - AzureDevOpsRepo
+      Targets:
+        -
+          Arn: !Sub ${BuildProject.Arn}
+          Id: triggerjobworker
+          RoleArn: !Sub ${CloudWatchEventRole.Arn}
+          InputTransformer:
+            InputPathsMap: {"executionid":"$.detail.execution-id", "pipelinename":"$.detail.pipeline"}
+            InputTemplate: "{\"environmentVariablesOverride\": [{\"name\": \"executionid\", \"type\": \"PLAINTEXT\", \"value\": <executionid>},{\"name\": \"pipelinename\", \"type\": \"PLAINTEXT\", \"value\": <pipelinename>}]}"
+  CloudWatchEventRuleBuildFailed:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - aws.codebuild
+        detail-type:
+          - 'CodeBuild Build State Change'
+        detail:
+          build-status:
+            - FAILED
+          project-name:
+            - !Sub ${AWS::StackName}-GetAzureDevOps-Repo
+      Targets:
+        -
+          Arn: !Sub ${LambdaCodeBuildFails.Arn}
+          Id: failtrigger
+          InputTransformer:
+            InputPathsMap: {"loglink":"$.detail.additional-information.logs.deep-link", "environment-variables":"$.detail.additional-information.environment.environment-variables", "exported-environment-variables":"$.detail.additional-information.exported-environment-variables"}
+            InputTemplate: "{\"loglink\": <loglink>, \"environment-variables\": <environment-variables>, \"exported-environment-variables\": <exported-environment-variables>}"
+  LambdaExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'LambdaExecutionPolicy4CodeBuildFails-${AWS::Region}'
+      Path: "/"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: codepipeline1
+            Effect: Allow
+            Action: [
+              'codepipeline:PutJobSuccessResult',
+              'codepipeline:PutJobFailureResult'
+            ]
+            Resource: '*'
+          - Sid: codepipeline2
+            Effect: Allow
+            Action: [
+              'codepipeline:StopPipelineExecution'
+            ]
+            Resource: !Sub 'arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:*'
+          - Sid: VisualEditor2
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      ManagedPolicyArns: [
+        !Ref LambdaExecutionPolicy
+      ]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+      Path: /
+      RoleName: !Sub 'LambdaExecutionRole4CodeBuildFails-${AWS::Region}'
+  LambdaCodeBuildFails:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: index.lambda_handler
+      FunctionName: AzureCodeBuildFails
+      Role:
+        Fn::GetAtt:
+          - "LambdaExecutionRole"
+          - "Arn"
+      Code:
+        ZipFile: |
+          import logging
+          from botocore.exceptions import ClientError
+          import boto3
+          LOGGER = logging.getLogger()
+          LOGGER.setLevel(logging.INFO)
+          def codepipeline_failure(job_id, message, link):
+              try:
+                  codepipeline = boto3.client('codepipeline')
+                  codepipeline.put_job_failure_result(
+                      jobId=job_id,
+                      failureDetails={'type': 'JobFailed', 'message': message, 'externalExecutionId': link}
+                  )
+                  LOGGER.info('===FAILURE===')
+                  return True
+              except ClientError as err:
+                  LOGGER.error("Failed to PutJobFailureResult for CodePipeline!\n%s", err)
+                  return False
+          def codepipeline_stop(execution_id, message, pipelinename):
+              try:
+                  codepipeline = boto3.client('codepipeline')
+                  codepipeline.stop_pipeline_execution(
+                      pipelineName=pipelinename,
+                      pipelineExecutionId=execution_id,
+                      abandon=True,
+                      reason=message
+                  )
+                  LOGGER.info('===FAILURE===')
+                  return True
+              except ClientError as err:
+                  LOGGER.error("Failed to Stop CodePipeline!\n%s", err)
+                  return False
+          def lambda_handler(event, context):
+              LOGGER.info(event)
+              try:
+                  job_id = event['exported-environment-variables'][0]['value']
+                  print(job_id)
+                  execution_id = event['environment-variables'][0]['value']
+                  print(execution_id)
+                  pipelinename = event['environment-variables'][1]['value']
+                  print(pipelinename)
+                  loglink = event['loglink']
+                  print(loglink)
+                  if ( job_id != "" ) :
+                      print("Found an job id")
+                      codepipeline_failure(job_id, "CodeBuild process failed", loglink)
+                  else :
+                      print("Found NO job id")
+                      codepipeline_stop(execution_id, "CodeBuild process failed", pipelinename)
+              except KeyError as err:
+                  LOGGER.error("Could not retrieve CodePipeline Job ID!\n%s", err, pipelinename)
+                  return False
+      Runtime: "python3.7"
+      Timeout: 25
+Outputs:
+  AzureDevopsActionType:
+    Value: !Sub ${AzureDevopsActionType}
+    Export:
+      Name: AzureDevopsActionType
+  BuildProjectRole:
+    Value: !Sub ${BuildProjectRole}
+    Export:
+      Name: BuildProjectRole
+  CodeBuildRoleArn:
+    Value: !Sub ${BuildProjectRole.Arn}
+    Export:
+      Name: AzureCodeBuildRoleArn
